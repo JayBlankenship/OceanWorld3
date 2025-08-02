@@ -1,3 +1,6 @@
+// game.js - Main game file  
+// Version: Updated 2025-08-02 09:15 - Fixed ship replication bugs
+
 import * as THREE from 'https://cdn.skypack.dev/three@0.134.0';
 import { createPlayerPawn } from './playerPawn.js';
 import { createShipPawn } from './shipPawn.js';
@@ -227,6 +230,14 @@ function initGame() {
         // Handle incoming player state updates from other clients
         window.Network.callbacks.handlePlayerState = (peerId, state) => {
             console.log(`[Game] Received player state from ${peerId}:`, state);
+            console.log(`[Game] Current networked players:`, Array.from(networkedPlayerManager.networkedPlayers.keys()));
+            
+            // Auto-create networked player if they don't exist yet
+            if (!networkedPlayerManager.networkedPlayers.has(peerId)) {
+                console.log(`[Game] Auto-creating networked player for ${peerId} since they sent state`);
+                networkedPlayerManager.addPlayer(peerId);
+            }
+            
             networkedPlayerManager.updatePlayer(peerId, state);
         };
         
@@ -238,13 +249,23 @@ function initGame() {
                 originalUpdateUI(peers);
             }
             
+            // Trigger networked player creation/cleanup
+            updateNetworkedPlayers();
+        };
+        
+        // Function to handle networked player creation and cleanup
+        function updateNetworkedPlayers() {
             // Only create red players if we're in a complete lobby
             if (window.Network.isInCompleteLobby && window.Network.isInCompleteLobby()) {
                 const currentPeerIds = window.Network.getLobbyPeerIds();
                 const existingPeerIds = Array.from(networkedPlayerManager.networkedPlayers.keys());
                 
-                console.log(`[Game] Lobby complete! Current peers:`, currentPeerIds);
+                console.log(`[Game] Lobby complete! My role: ${window.Network.isBase ? 'HOST' : 'CLIENT'}`);
+                console.log(`[Game] Current peers from getLobbyPeerIds():`, currentPeerIds);
                 console.log(`[Game] Existing networked players:`, existingPeerIds);
+                console.log(`[Game] My peer ID: ${window.Network.myPeerId}`);
+                console.log(`[Game] All lobby connected peers:`, window.Network.lobbyConnectedPeers || 'N/A');
+                console.log(`[Game] Lobby peers array:`, window.Network.lobbyPeers || 'N/A');
                 
                 // Add new players as red replicated pawns
                 for (const peerId of currentPeerIds) {
@@ -255,18 +276,6 @@ function initGame() {
                 }
                 
                 // Remove disconnected players
-            // Update global player position for exclusion zone logic
-            window.playerPosition = playerPawn.position.clone();
-
-            // Update terrain storm system
-            if (terrainGenerator && typeof terrainGenerator.updateStormSystem === 'function') {
-                terrainGenerator.updateStormSystem(deltaTime, playerPawn.position);
-            }
-
-            // Dynamically update terrain tiles with storm effects every frame
-            if (terrainGenerator && terrainGenerator.planes && typeof window.updateExclusionZoneEveryFrame === 'function') {
-                window.updateExclusionZoneEveryFrame(Array.from(terrainGenerator.planes.values()), terrainGenerator);
-            }
                 for (const peerId of existingPeerIds) {
                     if (!currentPeerIds.includes(peerId)) {
                         console.log(`[Game] Removing networked player for peer: ${peerId}`);
@@ -274,7 +283,12 @@ function initGame() {
                     }
                 }
             }
-        };
+        }
+        
+        // Call updateNetworkedPlayers initially and whenever lobby state changes
+        setTimeout(() => {
+            updateNetworkedPlayers();
+        }, 1000); // Give network time to establish connections
     }
 
     // Create multiple AI players
@@ -617,7 +631,11 @@ function initGame() {
                 globalOceanGeometry.computeVertexNormals();
             }
             // Broadcast our position to other players if we're in a complete lobby
-            if (window.Network && window.Network.isInCompleteLobby && window.Network.isInCompleteLobby()) {
+            const isInLobby = window.Network && window.Network.isInCompleteLobby && window.Network.isInCompleteLobby();
+            if (window.Network && window.Network.isBase) {
+                console.log(`[Game-Host] Broadcasting check: isInLobby=${isInLobby}, isBase=${window.Network.isBase}, paired=${window.Network.paired}, lobbyFull=${window.Network.lobbyFull}`);
+            }
+            if (isInLobby) {
                 // Create player state object
                 const playerState = {
                     position: {
@@ -636,6 +654,9 @@ function initGame() {
                 // Throttle network updates to avoid spam (send every ~100ms)
                 const now = Date.now();
                 if (!window.lastNetworkUpdate || now - window.lastNetworkUpdate > 100) {
+                    if (window.Network && window.Network.isBase) {
+                        console.log(`[Game-Host] Broadcasting player state:`, playerState);
+                    }
                     window.Network.broadcastPlayerState(playerState);
                     window.lastNetworkUpdate = now;
                 }
@@ -643,6 +664,19 @@ function initGame() {
 
             // Update red networked players (animate them smoothly)
             networkedPlayerManager.update(deltaTime, animationTime);
+
+            // Update global player position for exclusion zone logic
+            window.playerPosition = playerPawn.position.clone();
+
+            // Update terrain storm system
+            if (terrainGenerator && typeof terrainGenerator.updateStormSystem === 'function') {
+                terrainGenerator.updateStormSystem(deltaTime, playerPawn.position);
+            }
+
+            // Dynamically update terrain tiles with storm effects every frame
+            if (terrainGenerator && terrainGenerator.planes && typeof window.updateExclusionZoneEveryFrame === 'function') {
+                window.updateExclusionZoneEveryFrame(Array.from(terrainGenerator.planes.values()), terrainGenerator);
+            }
 
             // Broadcast terrain changes to other players if we're in a complete lobby
             if (window.Network && window.Network.isInCompleteLobby && window.Network.isInCompleteLobby() && terrainGenerator && typeof terrainGenerator.getTerrainChanges === 'function') {

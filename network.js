@@ -1,10 +1,11 @@
 // network.js - Peer-to-peer networking module
+// Version: Updated 2025-08-02 09:20 - Fixed host not seeing clients debug
 
 // --- NETWORK MODULE ---
 const Network = {
   // Configuration
   BASE_PEER_ID: 'NeonGameBootstrap-2025-001',
-  LOBBY_SIZE: 2, // Change this value to set the number of players required before islanding
+  LOBBY_SIZE: 3, // Change this value to set the number of players required before islanding
   
   // Private state
   myPeerId: null,
@@ -42,6 +43,7 @@ const Network = {
   // Initialize the network
   init() {
     console.log('[Network] Starting initialization...');
+    console.log(`[Network] LOBBY_SIZE is set to: ${this.LOBBY_SIZE} players`); // Debug log for lobby size
     this.myPeerId = `ChainNode-${Math.random().toString(36).substr(2, 8)}`;
     this.peer = new Peer(this.myPeerId, {
       host: '0.peerjs.com', port: 443, path: '/', secure: true,
@@ -489,18 +491,20 @@ const Network = {
         // Connected to host - lobby is ready
         this.retryCount = 0; // Reset retry count on successful connection
         this.partnerPeerId = data.hostId; // Host is our connection point
-        this.lobbyPeers = data.allPlayers.filter(peer => peer !== this.myPeerId); // All other players
+        this.lobbyPeers = data.allPlayers.filter(peer => peer !== this.myPeerId); // All other players (including host)
         this.paired = true;
         this.baseConn = this.hostConn; // Use host connection as base connection for compatibility
         
         console.log('Client lobby ready - allPlayers:', data.allPlayers);
-        console.log('Client lobby - lobbyPeers (others):', this.lobbyPeers);
+        console.log('Client lobby - lobbyPeers (all others including host):', this.lobbyPeers);
         console.log('Client lobby - total players:', data.allPlayers.length);
+        console.log('Client lobby - my peer ID:', this.myPeerId);
         
         if (this.callbacks.logChainEvent) {
           this.callbacks.logChainEvent(`[Client] Connected to host: ${data.hostId}, All players: ${data.allPlayers.join(', ')}`);
           this.callbacks.logChainEvent(`[Client] Lobby has ${data.allPlayers.length} total players (including host)`);
-          this.callbacks.logChainEvent(`[Client] Other players: ${this.lobbyPeers.join(', ')}`);
+          this.callbacks.logChainEvent(`[Client] Other players (including host): ${this.lobbyPeers.join(', ')}`);
+          this.callbacks.logChainEvent(`[Client] Other clients only: ${this.lobbyPeers.filter(p => p !== data.hostId).join(', ')}`);
         }
         if (this.callbacks.updateConnectionStatus) {
           this.callbacks.updateConnectionStatus(`Connected to host in ${data.allPlayers.length}-player lobby!`);
@@ -572,6 +576,9 @@ const Network = {
     if (data.type === 'player_state') {
       // Handle incoming player state updates
       if (data.peerId !== this.myPeerId) { // Don't process our own state
+        if (this.callbacks.logChainEvent) {
+          this.callbacks.logChainEvent(`[${this.isBase ? 'Host' : 'Client'}] Received player_state from ${data.peerId}, processing locally`);
+        }
         if (this.callbacks.handlePlayerState) {
           this.callbacks.handlePlayerState(data.peerId, data.state);
         }
@@ -579,6 +586,10 @@ const Network = {
         // Relay to other peers if we're the host
         if (this.isBase) {
           this.relayPlayerState(data, conn ? conn.peer : null);
+        }
+      } else {
+        if (this.callbacks.logChainEvent) {
+          this.callbacks.logChainEvent(`[${this.isBase ? 'Host' : 'Client'}] Ignoring player_state from self: ${data.peerId}`);
         }
       }
     }
@@ -650,16 +661,28 @@ const Network = {
     // Only the host relays player states to prevent loops
     if (this.isBase && this.lobbyPeerConnections) {
       let relayCount = 0;
+      if (this.callbacks.logChainEvent) {
+        this.callbacks.logChainEvent(`[PlayerStateRelay] Relaying state from ${data.peerId} (fromPeer: ${fromPeer})`);
+      }
       for (const [peerId, conn] of Object.entries(this.lobbyPeerConnections)) {
         // Don't send back to the sender, and only send to open connections
         if (peerId !== fromPeer && conn && conn.open) {
           try {
             conn.send(data);
             relayCount++;
+            if (this.callbacks.logChainEvent) {
+              this.callbacks.logChainEvent(`[PlayerStateRelay] Sent state to ${peerId}`);
+            }
           } catch (err) {
             console.warn(`[Host-PlayerStateRelay] Failed to send to ${peerId}:`, err);
+            if (this.callbacks.logChainEvent) {
+              this.callbacks.logChainEvent(`[PlayerStateRelay] Failed to send to ${peerId}: ${err.message}`, '#ff4444');
+            }
           }
         }
+      }
+      if (this.callbacks.logChainEvent) {
+        this.callbacks.logChainEvent(`[PlayerStateRelay] Relayed to ${relayCount} peers`);
       }
     }
   },
@@ -867,15 +890,28 @@ const Network = {
     
     // If we're the host, send to all connected clients
     if (this.isBase && this.lobbyPeerConnections) {
+      let sentCount = 0;
+      if (this.callbacks.logChainEvent) {
+        this.callbacks.logChainEvent(`[Host] Broadcasting player state to ${Object.keys(this.lobbyPeerConnections).length} clients`);
+      }
+      console.log(`[Host-Broadcast] Sending host state to ${Object.keys(this.lobbyPeerConnections).length} clients:`, stateMessage);
       for (const [peerId, conn] of Object.entries(this.lobbyPeerConnections)) {
         if (conn && conn.open) {
           try {
             conn.send(stateMessage);
+            sentCount++;
+            console.log(`[Host-Broadcast] Sent state to client: ${peerId}`);
           } catch (error) {
             console.warn(`[Network] Failed to send player state to ${peerId}:`, error);
           }
+        } else {
+          console.warn(`[Host-Broadcast] Connection to ${peerId} is not open`);
         }
       }
+      if (this.callbacks.logChainEvent) {
+        this.callbacks.logChainEvent(`[Host] Sent player state to ${sentCount} clients`);
+      }
+      console.log(`[Host-Broadcast] Total sent to ${sentCount} clients`);
     }
     
     // If we're a client, send to host (host will relay to other clients)
@@ -884,6 +920,9 @@ const Network = {
       if (hostConnection && hostConnection.open) {
         try {
           hostConnection.send(stateMessage);
+          if (this.callbacks.logChainEvent) {
+            this.callbacks.logChainEvent(`[Client] Sent player state to host`);
+          }
         } catch (error) {
           console.warn(`[Network] Failed to send player state to host:`, error);
         }
@@ -898,9 +937,19 @@ const Network = {
     if (this.isBase && this.lobbyConnectedPeers) {
       // For host, return all connected clients (excluding self)
       allPeers.push(...this.lobbyConnectedPeers.filter(peerId => peerId !== this.myPeerId));
+      if (this.callbacks.logChainEvent) {
+        this.callbacks.logChainEvent(`[Host] getLobbyPeerIds returning: [${allPeers.join(', ')}] from lobbyConnectedPeers: [${this.lobbyConnectedPeers.join(', ')}]`);
+        this.callbacks.logChainEvent(`[Host] isBase: ${this.isBase}, paired: ${this.paired}, lobbyFull: ${this.lobbyFull}`);
+        this.callbacks.logChainEvent(`[Host] isInCompleteLobby(): ${this.isInCompleteLobby()}`);
+      }
     } else if (this.paired && this.lobbyPeers) {
-      // For client, return all other players from lobby
-      allPeers.push(...this.lobbyPeers.filter(peerId => peerId !== this.myPeerId));
+      // For client, lobbyPeers already excludes self, so return all
+      allPeers.push(...this.lobbyPeers);
+      if (this.callbacks.logChainEvent) {
+        this.callbacks.logChainEvent(`[Client] getLobbyPeerIds returning: [${allPeers.join(', ')}] from lobbyPeers: [${this.lobbyPeers.join(', ')}]`);
+        this.callbacks.logChainEvent(`[Client] isBase: ${this.isBase}, paired: ${this.paired}, lobbyFull: ${this.lobbyFull}`);
+        this.callbacks.logChainEvent(`[Client] isInCompleteLobby(): ${this.isInCompleteLobby()}`);
+      }
     }
     
     return allPeers;
@@ -908,7 +957,11 @@ const Network = {
   
   // Check if we're in a complete lobby
   isInCompleteLobby() {
-    return this.paired || (this.isBase && this.lobbyFull);
+    const result = this.paired || (this.isBase && this.lobbyFull);
+    if (this.callbacks.logChainEvent) {
+      this.callbacks.logChainEvent(`[${this.isBase ? 'Host' : 'Client'}] isInCompleteLobby check: paired=${this.paired}, isBase=${this.isBase}, lobbyFull=${this.lobbyFull}, result=${result}`);
+    }
+    return result;
   },
 
   // --- TERRAIN SYNCHRONIZATION ---
