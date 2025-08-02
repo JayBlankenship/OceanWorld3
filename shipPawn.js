@@ -59,7 +59,7 @@ function calculateOceanHeight(x, z) {
     return height;
 }
 
-export function createShipPawn(isAI = false, color = null) {
+export function createShipPawn(isAI = false, color = null, showStar = false) {
     // Determine color: custom color takes priority, then AI/human default
     let shipColor;
     if (color !== null) {
@@ -85,9 +85,31 @@ export function createShipPawn(isAI = false, color = null) {
     placeholder.position.y = 0; // Position on water surface
     playerGroup.add(placeholder);
     
-    // Try to load Ship1.glb first
-    const loader = new GLTFLoader();
-    loader.load(
+    // For networked players, immediately create a simple ship without trying to load GLTF
+    if (color === 0xFF0000) { // If this is a networked player (red color)
+        console.log('Creating simple ship for networked player');
+        console.log('Color check passed:', color, '=== 0xFF0000:', color === 0xFF0000);
+        // Remove placeholder immediately
+        playerGroup.remove(placeholder);
+        
+        // Create simple ship geometry instead of trying to load GLTF
+        const simpleShipGeometry = new THREE.BoxGeometry(3, 1, 6);
+        const simpleShipMaterial = new THREE.MeshLambertMaterial({ 
+            color: shipColor,
+            emissive: new THREE.Color(shipColor),
+            emissiveIntensity: 0.1
+        });
+        const simpleShip = new THREE.Mesh(simpleShipGeometry, simpleShipMaterial);
+        simpleShip.position.y = 0;
+        playerGroup.add(simpleShip);
+        playerGroup.shipModel = simpleShip;
+        
+        console.log('Simple ship created and added to playerGroup');
+    } else {
+        console.log('Not a networked player, using GLTF loader. Color:', color);
+        // Try to load Ship1.glb for local and AI players
+        const loader = new GLTFLoader();
+        loader.load(
         './Ship1.glb',
         (gltf) => {
             console.log('Ship1.glb loaded successfully');
@@ -152,12 +174,15 @@ export function createShipPawn(isAI = false, color = null) {
             // Store ship reference for animations
             playerGroup.shipModel = shipMesh;
         }
-    );
+        );
+    }
 
-    // Create and add star to the player group (positioned above ship)
-    const star = createStar(shipColor);
-    star.position.y = 5.0; // Position star higher above ship
-    playerGroup.add(star);
+    // Create and add star to the player group (positioned above ship) - only if showStar is true
+    if (showStar) {
+        const star = createStar(shipColor);
+        star.position.y = 5.0; // Position star higher above ship
+        playerGroup.add(star);
+    }
 
     // Ship motion variables for ocean movement
     let bobPhase = Math.random() * Math.PI * 2;

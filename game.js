@@ -139,7 +139,6 @@ function createGlobalOcean(scene, size = 120, segments = 64) {
     globalOceanSegments = segments;
     globalOceanSize = size;
 }
-import { createStar } from './star.js';
 import { createAIPlayer } from './ai.js';
 import { TerrainPlane } from './terrainPlane.js';
 import { TerrainGenerator } from './terrainGenerator.js'; // Import the new class
@@ -216,7 +215,7 @@ function initGame() {
     renderer.setSize(window.innerWidth, window.innerHeight);
 
     // Create ship pawn and star
-    const playerPawn = createShipPawn(false); // false indicates human player
+    const playerPawn = createShipPawn(false, null, false); // false indicates human player, no star
     scene.add(playerPawn);
 
     // Initialize networked player manager for red replicated players

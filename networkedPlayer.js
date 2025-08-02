@@ -1,13 +1,76 @@
 import * as THREE from 'https://cdn.skypack.dev/three@0.134.0';
-import { createPlayerPawn } from './playerPawn.js';
+import { GLTFLoader } from 'https://cdn.skypack.dev/three@0.134.0/examples/jsm/loaders/GLTFLoader.js';
 
 export class NetworkedPlayer {
     constructor(peerId, scene) {
         this.peerId = peerId;
         this.scene = scene;
         
-        // Create a visual representation using bright red color for networked players
-        this.pawn = createPlayerPawn(false, 0xFF0000); // false = not AI, red color
+        console.log(`[NetworkedPlayer] About to create ship for peer: ${peerId}`);
+        
+        // Create the player group that will hold the ship
+        this.pawn = new THREE.Group();
+        this.pawn.position.set(0, 20, 0); // Start at water level
+        
+        // Load Ship1.glb for networked players - same as everyone else
+        const loader = new GLTFLoader();
+        loader.load(
+            './Ship1.glb',
+            (gltf) => {
+                console.log(`[NetworkedPlayer] Ship1.glb loaded successfully for peer: ${peerId}`);
+                const shipModel = gltf.scene;
+                
+                // Configure the ship
+                shipModel.scale.setScalar(1.0);
+                shipModel.position.y = 0;
+                
+                // Apply RED color tint to ship materials
+                shipModel.traverse((child) => {
+                    if (child.isMesh && child.material) {
+                        // Clone material to avoid affecting other instances
+                        child.material = child.material.clone();
+                        
+                        // Apply red color tint
+                        const redColor = new THREE.Color(0xFF0000);
+                        if (child.material.color) {
+                            child.material.color.lerp(redColor, 0.3); // 30% red tint
+                        }
+                        
+                        // Add red emissive glow for visibility
+                        if (child.material.emissive) {
+                            child.material.emissive.copy(redColor);
+                            child.material.emissiveIntensity = 0.15;
+                        }
+                    }
+                });
+                
+                this.pawn.add(shipModel);
+                this.pawn.shipModel = shipModel; // Store reference for animations
+                
+                console.log(`[NetworkedPlayer] RED Ship1.glb added to scene for peer: ${peerId}`);
+            },
+            (progress) => {
+                console.log(`[NetworkedPlayer] Loading Ship1.glb progress for ${peerId}:`, (progress.loaded / progress.total) * 100 + '%');
+            },
+            (error) => {
+                console.error(`[NetworkedPlayer] Error loading Ship1.glb for peer ${peerId}:`, error);
+                
+                // Fallback: create a simple red ship if GLTF fails
+                const fallbackGeometry = new THREE.BoxGeometry(3, 1, 6);
+                const fallbackMaterial = new THREE.MeshLambertMaterial({ 
+                    color: 0xFF0000,
+                    emissive: 0x440000,
+                    emissiveIntensity: 0.2
+                });
+                const fallbackShip = new THREE.Mesh(fallbackGeometry, fallbackMaterial);
+                fallbackShip.position.y = 0;
+                this.pawn.add(fallbackShip);
+                this.pawn.shipModel = fallbackShip;
+                
+                console.log(`[NetworkedPlayer] Fallback ship created for peer: ${peerId}`);
+            }
+        );
+        
         this.scene.add(this.pawn);
         
         // Network interpolation variables
@@ -23,8 +86,8 @@ export class NetworkedPlayer {
             timestamp: Date.now()
         };
         
-        console.log(`[NetworkedPlayer] Created RED networked player for peer: ${peerId} at position:`, this.pawn.position);
-        console.log(`[NetworkedPlayer] Player ${peerId} should be visible as RED in the scene`);
+        console.log(`[NetworkedPlayer] Created RED networked ship for peer: ${peerId} at position:`, this.pawn.position);
+        console.log(`[NetworkedPlayer] Player ${peerId} should be visible as RED ship in the scene`);
     }
     
     // Update the player's state from network data
@@ -53,7 +116,7 @@ export class NetworkedPlayer {
             this.pawn.setSurge(state.surgeActive);
         }
         
-        console.log(`[NetworkedPlayer] Updated RED player ${this.peerId} position to:`, this.pawn.position);
+        console.log(`[NetworkedPlayer] Updated RED ship ${this.peerId} position to:`, this.pawn.position);
     }
     
     // Update the networked player (called each frame)
@@ -82,7 +145,7 @@ export class NetworkedPlayer {
     destroy() {
         if (this.pawn && this.scene) {
             this.scene.remove(this.pawn);
-            console.log(`[NetworkedPlayer] Removed networked player: ${this.peerId}`);
+            console.log(`[NetworkedPlayer] Removed networked ship: ${this.peerId}`);
         }
     }
     
@@ -92,7 +155,7 @@ export class NetworkedPlayer {
     }
 }
 
-// NetworkedPlayerManager - manages all remote players
+// NetworkedPlayerManager - manages all remote player ships
 export class NetworkedPlayerManager {
     constructor(scene) {
         this.scene = scene;
@@ -101,7 +164,7 @@ export class NetworkedPlayerManager {
         console.log('[NetworkedPlayerManager] Initialized');
     }
     
-    // Add a new networked player
+    // Add a new networked player ship
     addPlayer(peerId) {
         if (this.networkedPlayers.has(peerId)) {
             console.warn(`[NetworkedPlayerManager] Player ${peerId} already exists`);
@@ -111,7 +174,7 @@ export class NetworkedPlayerManager {
         const networkedPlayer = new NetworkedPlayer(peerId, this.scene);
         this.networkedPlayers.set(peerId, networkedPlayer);
         
-        console.log(`[NetworkedPlayerManager] Added player: ${peerId}`);
+        console.log(`[NetworkedPlayerManager] Added ship: ${peerId}`);
     }
     
     // Remove a networked player
@@ -120,7 +183,7 @@ export class NetworkedPlayerManager {
         if (networkedPlayer) {
             networkedPlayer.destroy();
             this.networkedPlayers.delete(peerId);
-            console.log(`[NetworkedPlayerManager] Removed player: ${peerId}`);
+            console.log(`[NetworkedPlayerManager] Removed ship: ${peerId}`);
         }
     }
     
@@ -130,18 +193,18 @@ export class NetworkedPlayerManager {
         if (networkedPlayer) {
             networkedPlayer.updateFromNetwork(state);
         } else {
-            console.warn(`[NetworkedPlayerManager] Received update for unknown player: ${peerId}`);
+            console.warn(`[NetworkedPlayerManager] Received update for unknown ship: ${peerId}`);
         }
     }
     
-    // Update all networked players (called each frame)
+    // Update all networked player ships (called each frame)
     update(deltaTime, animationTime) {
         for (const [peerId, networkedPlayer] of this.networkedPlayers) {
             networkedPlayer.update(deltaTime, animationTime);
         }
     }
     
-    // Get all networked player positions (for terrain generation, etc.)
+    // Get all networked player ship positions (for terrain generation, etc.)
     getAllPositions() {
         const positions = [];
         for (const [peerId, networkedPlayer] of this.networkedPlayers) {
@@ -156,6 +219,6 @@ export class NetworkedPlayerManager {
             networkedPlayer.destroy();
         }
         this.networkedPlayers.clear();
-        console.log('[NetworkedPlayerManager] Cleared all networked players');
+        console.log('[NetworkedPlayerManager] Cleared all networked ships');
     }
 }

@@ -4,7 +4,7 @@ import { createShipPawn } from './shipPawn.js';
 
 export function createAIPlayer() {
     // Create AI ship with isAI=true to get purple color and no keyboard controls
-    const aiPawn = createShipPawn(true);
+    const aiPawn = createShipPawn(true, null, false); // true = AI, no star
     
     // Set random starting position
     aiPawn.position.set(

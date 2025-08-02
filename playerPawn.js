@@ -1,5 +1,4 @@
 import * as THREE from 'https://cdn.skypack.dev/three@0.134.0';
-import { createStar } from './star.js';
 
 function pseudoPerlinNoise(t, seed) {
     const a = Math.sin(t * 1.3 + seed) * 1.7;
@@ -39,10 +38,6 @@ export function createPlayerPawn(isAI = false, color = null) {
     topCone.rotation.x = Math.PI;
     playerGroup.add(bottomCone);
     playerGroup.add(topCone);
-
-    // Create and add star to the player group
-    const star = createStar(coneColor);
-    playerGroup.add(star);
 
     // Organic motion variables
     let bottomSpinSpeed = (Math.random() - 0.5) * 1.0;
@@ -128,9 +123,6 @@ export function createPlayerPawn(isAI = false, color = null) {
         if (bottomCone.rotation.y > bottomSpinAngle || bottomCone.rotation.y < -bottomSpinAngle) {
             bottomSpinSpeed *= -1 * (0.85 + Math.random() * 0.3);
         }
-
-        // Update the star with cone tip positions
-        star.update(deltaTime, animationTime, this.getConeTips());
     };
 
     function easeOutQuad(x) {
