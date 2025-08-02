@@ -879,7 +879,11 @@ const Network = {
   
   // Send player state to all connected peers
   broadcastPlayerState(playerState) {
-    if (!this.paired && !this.isBase) return;
+    // Allow broadcasting as soon as we have any connections, not just when lobby is complete
+    if (!this.isInitialized) {
+      console.warn(`[Network] Cannot broadcast - not initialized`);
+      return;
+    }
     
     const stateMessage = {
       type: 'player_state',
@@ -888,67 +892,104 @@ const Network = {
       timestamp: Date.now()
     };
     
-    // If we're the host, send to all connected clients
+    let totalSent = 0;
+    let totalFailed = 0;
+    
+    // If we're the host, send to all connected clients (even if lobby isn't full)
     if (this.isBase && this.lobbyPeerConnections) {
       let sentCount = 0;
+      const connectionKeys = Object.keys(this.lobbyPeerConnections);
+      
       if (this.callbacks.logChainEvent) {
-        this.callbacks.logChainEvent(`[Host] Broadcasting player state to ${Object.keys(this.lobbyPeerConnections).length} clients`);
+        this.callbacks.logChainEvent(`[Host] Broadcasting player state to ${connectionKeys.length} clients (lobby filling)`);
       }
-      console.log(`[Host-Broadcast] Sending host state to ${Object.keys(this.lobbyPeerConnections).length} clients:`, stateMessage);
+      console.log(`[Host-Broadcast] Attempting to send host state to ${connectionKeys.length} clients:`, stateMessage);
+      
       for (const [peerId, conn] of Object.entries(this.lobbyPeerConnections)) {
         if (conn && conn.open) {
           try {
             conn.send(stateMessage);
             sentCount++;
-            console.log(`[Host-Broadcast] Sent state to client: ${peerId}`);
+            console.log(`[Host-Broadcast] ✓ Sent state to client: ${peerId}`);
           } catch (error) {
-            console.warn(`[Network] Failed to send player state to ${peerId}:`, error);
+            console.warn(`[Host-Broadcast] ✗ Failed to send player state to ${peerId}:`, error);
+            totalFailed++;
           }
         } else {
-          console.warn(`[Host-Broadcast] Connection to ${peerId} is not open`);
+          console.warn(`[Host-Broadcast] ✗ Connection to ${peerId} is not open (conn=${!!conn}, open=${conn?.open})`);
+          totalFailed++;
         }
       }
+      
+      totalSent += sentCount;
+      
       if (this.callbacks.logChainEvent) {
         this.callbacks.logChainEvent(`[Host] Sent player state to ${sentCount} clients`);
       }
-      console.log(`[Host-Broadcast] Total sent to ${sentCount} clients`);
+      console.log(`[Host-Broadcast] Summary: sent to ${sentCount}/${connectionKeys.length} clients, ${totalFailed} failed`);
+      
+      // Additional debugging if no clients received the message
+      if (sentCount === 0 && connectionKeys.length > 0) {
+        console.error(`[Host-Broadcast] CRITICAL: Failed to send to ANY clients despite having ${connectionKeys.length} connections!`);
+        console.error(`[Host-Broadcast] Connection states:`, Object.fromEntries(
+          Object.entries(this.lobbyPeerConnections).map(([peerId, conn]) => [
+            peerId, 
+            { exists: !!conn, open: conn?.open, readyState: conn?.readyState }
+          ])
+        ));
+      }
     }
     
-    // If we're a client, send to host (host will relay to other clients)
+    // If we're a client, send to host (even if lobby isn't full)
     if (!this.isBase) {
       const hostConnection = this.hostConn || this.baseConn;
       if (hostConnection && hostConnection.open) {
         try {
           hostConnection.send(stateMessage);
+          totalSent++;
           if (this.callbacks.logChainEvent) {
-            this.callbacks.logChainEvent(`[Client] Sent player state to host`);
+            this.callbacks.logChainEvent(`[Client] Sent player state to host (lobby filling)`);
           }
+          console.log(`[Client-Broadcast] ✓ Sent state to host: ${hostConnection.peer}`);
         } catch (error) {
-          console.warn(`[Network] Failed to send player state to host:`, error);
+          console.warn(`[Client-Broadcast] ✗ Failed to send player state to host:`, error);
+          totalFailed++;
         }
+      } else {
+        console.warn(`[Client-Broadcast] ✗ No open host connection (hostConn=${!!this.hostConn}, baseConn=${!!this.baseConn}, open=${hostConnection?.open})`);
+        totalFailed++;
       }
+    }
+    
+    // Summary logging
+    if (totalSent === 0 && (this.isBase ? Object.keys(this.lobbyPeerConnections || {}).length > 0 : true)) {
+      console.error(`[Network] BROADCAST FAILURE: Sent to ${totalSent} peers, ${totalFailed} failed. Role: ${this.isBase ? 'HOST' : 'CLIENT'}`);
     }
   },
   
-  // Get current lobby peer IDs (excluding self)
+  // Get current lobby peer IDs (excluding self) - includes peers even when lobby is filling
   getLobbyPeerIds() {
     const allPeers = [];
     
     if (this.isBase && this.lobbyConnectedPeers) {
-      // For host, return all connected clients (excluding self)
+      // For host, return all connected clients (excluding self) even if lobby isn't full
       allPeers.push(...this.lobbyConnectedPeers.filter(peerId => peerId !== this.myPeerId));
       if (this.callbacks.logChainEvent) {
-        this.callbacks.logChainEvent(`[Host] getLobbyPeerIds returning: [${allPeers.join(', ')}] from lobbyConnectedPeers: [${this.lobbyConnectedPeers.join(', ')}]`);
+        this.callbacks.logChainEvent(`[Host] getLobbyPeerIds returning: [${allPeers.join(', ')}] from lobbyConnectedPeers: [${this.lobbyConnectedPeers.join(', ')}] (lobby ${this.lobbyFull ? 'complete' : 'filling'})`);
         this.callbacks.logChainEvent(`[Host] isBase: ${this.isBase}, paired: ${this.paired}, lobbyFull: ${this.lobbyFull}`);
-        this.callbacks.logChainEvent(`[Host] isInCompleteLobby(): ${this.isInCompleteLobby()}`);
       }
-    } else if (this.paired && this.lobbyPeers) {
+    } else if (this.lobbyPeers && this.lobbyPeers.length > 0) {
       // For client, lobbyPeers already excludes self, so return all
       allPeers.push(...this.lobbyPeers);
       if (this.callbacks.logChainEvent) {
-        this.callbacks.logChainEvent(`[Client] getLobbyPeerIds returning: [${allPeers.join(', ')}] from lobbyPeers: [${this.lobbyPeers.join(', ')}]`);
+        this.callbacks.logChainEvent(`[Client] getLobbyPeerIds returning: [${allPeers.join(', ')}] from lobbyPeers: [${this.lobbyPeers.join(', ')}] (${this.paired ? 'lobby complete' : 'lobby filling'})`);
         this.callbacks.logChainEvent(`[Client] isBase: ${this.isBase}, paired: ${this.paired}, lobbyFull: ${this.lobbyFull}`);
-        this.callbacks.logChainEvent(`[Client] isInCompleteLobby(): ${this.isInCompleteLobby()}`);
+      }
+    } else if (!this.isBase && this.partnerPeerId) {
+      // If we're a client with just a host connection but no full lobby data yet
+      allPeers.push(this.partnerPeerId);
+      if (this.callbacks.logChainEvent) {
+        this.callbacks.logChainEvent(`[Client] getLobbyPeerIds returning host only: [${this.partnerPeerId}] (early connection)`);
       }
     }
     

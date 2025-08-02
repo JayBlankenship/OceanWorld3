@@ -630,12 +630,33 @@ function initGame() {
                 // Skip color updates to prevent rendering issues
                 globalOceanGeometry.computeVertexNormals();
             }
-            // Broadcast our position to other players if we're in a complete lobby
-            const isInLobby = window.Network && window.Network.isInCompleteLobby && window.Network.isInCompleteLobby();
+            // Broadcast our position to other players as soon as we have any connections
+            const hasAnyPeers = window.Network && window.Network.getLobbyPeerIds && window.Network.getLobbyPeerIds().length > 0;
+            const isInitialized = window.Network && window.Network.isInitialized;
+            
+            // Enhanced debugging for host broadcasting
             if (window.Network && window.Network.isBase) {
-                console.log(`[Game-Host] Broadcasting check: isInLobby=${isInLobby}, isBase=${window.Network.isBase}, paired=${window.Network.paired}, lobbyFull=${window.Network.lobbyFull}`);
+                // Detailed host debugging every 1 second instead of every frame
+                if (!window.lastHostDebug || Date.now() - window.lastHostDebug > 1000) {
+                    console.log(`[Game-Host] Broadcasting status check:`);
+                    console.log(`  - hasAnyPeers: ${hasAnyPeers}`);
+                    console.log(`  - isInitialized: ${isInitialized}`);
+                    console.log(`  - peerCount: ${window.Network.getLobbyPeerIds ? window.Network.getLobbyPeerIds().length : 0}`);
+                    console.log(`  - lobbyConnectedPeers: [${window.Network.lobbyConnectedPeers?.join(', ') || 'N/A'}]`);
+                    console.log(`  - lobbyPeerConnections: ${Object.keys(window.Network.lobbyPeerConnections || {}).length} connections`);
+                    console.log(`  - isBase: ${window.Network.isBase}, paired: ${window.Network.paired}, lobbyFull: ${window.Network.lobbyFull}`);
+                    window.lastHostDebug = Date.now();
+                }
             }
-            if (isInLobby) {
+            
+            // More robust broadcasting condition - try to broadcast if we have network AND either peers or connections
+            const shouldBroadcast = window.Network && isInitialized && (
+                hasAnyPeers || 
+                (window.Network.isBase && window.Network.lobbyPeerConnections && Object.keys(window.Network.lobbyPeerConnections).length > 0) ||
+                (!window.Network.isBase && window.Network.hostConn && window.Network.hostConn.open)
+            );
+            
+            if (shouldBroadcast) {
                 // Create player state object
                 const playerState = {
                     position: {
@@ -655,10 +676,24 @@ function initGame() {
                 const now = Date.now();
                 if (!window.lastNetworkUpdate || now - window.lastNetworkUpdate > 100) {
                     if (window.Network && window.Network.isBase) {
-                        console.log(`[Game-Host] Broadcasting player state:`, playerState);
+                        console.log(`[Game-Host] Broadcasting player state to ${window.Network.getLobbyPeerIds ? window.Network.getLobbyPeerIds().length : 0} peers:`, playerState);
                     }
-                    window.Network.broadcastPlayerState(playerState);
-                    window.lastNetworkUpdate = now;
+                    
+                    try {
+                        window.Network.broadcastPlayerState(playerState);
+                        window.lastNetworkUpdate = now;
+                    } catch (error) {
+                        console.error(`[Game] Error broadcasting player state:`, error);
+                    }
+                }
+            } else if (window.Network && window.Network.isBase) {
+                // Debug why host isn't broadcasting
+                if (!window.lastNoBroadcastDebug || Date.now() - window.lastNoBroadcastDebug > 2000) {
+                    console.warn(`[Game-Host] NOT broadcasting because:`);
+                    console.warn(`  - hasAnyPeers: ${hasAnyPeers}`);
+                    console.warn(`  - isInitialized: ${isInitialized}`);
+                    console.warn(`  - lobbyPeerConnections count: ${window.Network.lobbyPeerConnections ? Object.keys(window.Network.lobbyPeerConnections).length : 'N/A'}`);
+                    window.lastNoBroadcastDebug = Date.now();
                 }
             }
 
