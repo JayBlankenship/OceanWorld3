@@ -17,6 +17,7 @@ let globalOceanWaveState = {
     timer: 0,
     storms: [], // Array of active storm systems
     stormIntensity: 0.5, // Global storm intensity factor
+    targetStormIntensity: 0.5, // Target storm intensity for gradual transitions
     maxStorms: 4 // Allow more simultaneous storms
 };
 let globalOceanSize = 120;
@@ -558,19 +559,19 @@ function initGame() {
                         // Extreme storm: very high amp and speed
                         globalOceanWaveState.targetAmp = 2.0 + Math.random() * 2.5; // Much more intense (was 1.2-1.9)
                         globalOceanWaveState.targetSpeed = 3.5 + Math.random() * 2.0; // Faster waves
-                        globalOceanWaveState.stormIntensity = 0.8 + Math.random() * 0.2; // High storm intensity
+                        globalOceanWaveState.targetStormIntensity = 0.8 + Math.random() * 0.2; // High storm intensity
                     } else {
                         // Brief calm: low amp and speed (shorter duration)
                         globalOceanWaveState.targetAmp = 0.3 + Math.random() * 0.4;
                         globalOceanWaveState.targetSpeed = 1.0 + Math.random() * 0.8;
-                        globalOceanWaveState.stormIntensity = 0.1 + Math.random() * 0.2; // Low storm intensity
+                        globalOceanWaveState.targetStormIntensity = 0.1 + Math.random() * 0.2; // Low storm intensity
                     }
                     globalOceanWaveState.timer = 6 + Math.random() * 6; // Shorter cycles for more dynamic weather
                 }
-                // Faster interpolation for more dynamic weather changes
-                globalOceanWaveState.amp += (globalOceanWaveState.targetAmp - globalOceanWaveState.amp) * deltaTime * 0.25;
-                globalOceanWaveState.speed += (globalOceanWaveState.targetSpeed - globalOceanWaveState.speed) * deltaTime * 0.25;
-                globalOceanWaveState.stormIntensity += (globalOceanWaveState.stormIntensity - globalOceanWaveState.stormIntensity) * deltaTime * 0.2;
+                // Very gradual interpolation for ultra-smooth, realistic weather transitions
+                globalOceanWaveState.amp += (globalOceanWaveState.targetAmp - globalOceanWaveState.amp) * deltaTime * 0.02;
+                globalOceanWaveState.speed += (globalOceanWaveState.targetSpeed - globalOceanWaveState.speed) * deltaTime * 0.02;
+                globalOceanWaveState.stormIntensity += (globalOceanWaveState.targetStormIntensity - globalOceanWaveState.stormIntensity) * deltaTime * 0.015;
                 // Center ocean on player
                 globalOcean.position.x = playerPawn.position.x;
                 globalOcean.position.z = playerPawn.position.z;

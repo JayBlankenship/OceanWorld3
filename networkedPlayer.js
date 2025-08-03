@@ -123,11 +123,9 @@ export class NetworkedPlayer {
         
         this.scene.add(this.pawn);
         
-        // Network interpolation variables
+        // Network state variables
         this.targetPosition = new THREE.Vector3();
         this.targetRotation = new THREE.Euler();
-        this.lastUpdateTime = Date.now();
-        this.interpolationSpeed = 10; // How fast to interpolate to target position
         
         // Store the last known state
         this.lastKnownState = {
@@ -144,17 +142,16 @@ export class NetworkedPlayer {
     updateFromNetwork(state) {
         if (!state || !state.position) return;
         
-        // Update target position and rotation for smooth interpolation
+        // Directly set position and rotation (no interpolation)
         this.targetPosition.set(state.position.x, state.position.y, state.position.z);
         
         if (state.rotation) {
             this.targetRotation.set(state.rotation.x, state.rotation.y, state.rotation.z);
         }
         
-        this.lastUpdateTime = Date.now();
         this.lastKnownState = { ...state };
         
-        // For now, immediately set position (we can add interpolation later)
+        // Immediately set position and rotation
         this.pawn.position.copy(this.targetPosition);
         
         if (state.rotation) {
@@ -174,21 +171,9 @@ export class NetworkedPlayer {
         // Apply buoyancy - calculate ocean surface height at ship's position
         const oceanSurfaceY = calculateOceanHeight(this.pawn.position.x, this.pawn.position.z);
         
-        // Smoothly interpolate to target position, but keep Y at ocean surface
-        const timeSinceUpdate = Date.now() - this.lastUpdateTime;
-        
-        // If we haven't received an update in a while, don't interpolate too much
-        if (timeSinceUpdate < 1000) { // 1 second timeout
-            // Interpolate X and Z position
-            this.pawn.position.x = THREE.MathUtils.lerp(this.pawn.position.x, this.targetPosition.x, deltaTime * this.interpolationSpeed);
-            this.pawn.position.z = THREE.MathUtils.lerp(this.pawn.position.z, this.targetPosition.z, deltaTime * this.interpolationSpeed);
-            
-            // Slerp rotation for smooth rotation interpolation
-            const currentQuat = new THREE.Quaternion().setFromEuler(this.pawn.rotation);
-            const targetQuat = new THREE.Quaternion().setFromEuler(this.targetRotation);
-            currentQuat.slerp(targetQuat, deltaTime * this.interpolationSpeed);
-            this.pawn.rotation.setFromQuaternion(currentQuat);
-        }
+        // No interpolation - directly use the target position and rotation
+        this.pawn.position.copy(this.targetPosition);
+        this.pawn.rotation.copy(this.targetRotation);
         
         // Always apply buoyancy (override Y position)
         this.pawn.position.y = oceanSurfaceY;
